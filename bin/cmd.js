@@ -473,6 +473,13 @@ function drawTorrent (torrent) {
     process.stdout.write(new Buffer('G1tIG1sySg==', 'base64')) // clear for drawing
     drawInterval = setInterval(draw, 500)
     drawInterval.unref()
+  } else {
+    drawInterval = setInterval(trafficBalancer, 2000)
+    drawInterval.unref()
+
+    if (server) {
+      clivas.line('{green:server running at} {bold:' + href + '}')
+    }
   }
 
   function draw () {
@@ -580,6 +587,41 @@ function drawTorrent (torrent) {
 
     clivas.line('{80:}')
     clivas.flush(true)
+  }
+  function trafficBalancer () {
+    var hotswaps = 0
+    torrent.on('hotswap', function () {
+      hotswaps += 1
+    })
+
+    var unchoked = torrent.swarm.wires.filter(function (wire) {
+      return !wire.peerChoking
+    })
+    var speed = torrent.downloadSpeed()
+    var estimate = moment.duration(torrent.timeRemaining / 1000, 'seconds').humanize()
+
+    console.log( 'speed: ' + prettyBytes(speed) + '/s' +
+            ' peers: ' + unchoked.length + '/' + torrent.swarm.wires.length +
+            ' time remaining: ' + estimate +
+            ' total: ' + getRuntime() + 's' +
+            ' queued peers ' + torrent.swarm.numQueued
+
+    )
+    torrent.swarm.wires.every(function (wire) {
+      if( !wire.remoteAddress ){
+        speed -= wire.downloadSpeed();
+        console.log('webseed speed ' + prettyBytes(wire.downloadSpeed()) +
+            ' ' + wire.requests.length + ' reqs' +
+            (wire.peerChoking ? ' choked':' unchoked')
+        )
+        console.log('p2p speed is '+speed)
+        if (speed > 200000){
+          wire._onChoke()
+        } else {
+          wire._onUnchoke()
+        }
+      }
+    })
   }
 }
 
