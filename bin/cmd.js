@@ -474,7 +474,7 @@ function drawTorrent (torrent) {
     drawInterval = setInterval(draw, 500)
     drawInterval.unref()
   } else {
-    drawInterval = setInterval(trafficBalancer, 2000)
+    drawInterval = setInterval(trafficBalancer, 500)
     drawInterval.unref()
 
     if (server) {
@@ -589,17 +589,14 @@ function drawTorrent (torrent) {
     clivas.flush(true)
   }
   function trafficBalancer () {
-    var hotswaps = 0
-    torrent.on('hotswap', function () {
-      hotswaps += 1
-    })
-
     var unchoked = torrent.swarm.wires.filter(function (wire) {
       return !wire.peerChoking
     })
+    var webseeds = torrent.swarm.wires.filter(function (wire) {
+      return !wire.remoteAddress
+    })
     var speed = torrent.downloadSpeed()
     var estimate = moment.duration(torrent.timeRemaining / 1000, 'seconds').humanize()
-
     console.log( 'speed: ' + prettyBytes(speed) + '/s' +
             ' peers: ' + unchoked.length + '/' + torrent.swarm.wires.length +
             ' time remaining: ' + estimate +
@@ -607,21 +604,43 @@ function drawTorrent (torrent) {
             ' queued peers ' + torrent.swarm.numQueued
 
     )
-    torrent.swarm.wires.every(function (wire) {
-      if( !wire.remoteAddress ){
-        speed -= wire.downloadSpeed();
-        console.log('webseed speed ' + prettyBytes(wire.downloadSpeed()) +
-            ' ' + wire.requests.length + ' reqs' +
-            (wire.peerChoking ? ' choked':' unchoked')
-        )
-        console.log('p2p speed is '+speed)
-        if (speed > 200000){
-          wire._onChoke()
-        } else {
-          wire._onUnchoke()
-        }
+    webseeds.forEach(function (wire) {
+      speed -= wire.downloadSpeed();
+      console.log('webseed speed ' + prettyBytes(wire.downloadSpeed()) +
+          ' ' + wire.requests.length + ' reqs' +
+          (wire.peerChoking ? ' choked':' unchoked')
+      )
+      if(!wire.peerChoking && wire.downloadSpeed() < 100){
+        wire.unchoke()
+        wire.choke()
+        console.log('webseed speed too slow, unchoke it')
       }
     })
+    console.log('p2p speed is '+speed)
+    if (speed > 200000){
+      webseeds.forEach(function (wire) {
+        if(!wire.peerChoking){
+          console.log('Choke webseed')
+          wire._onChoke()
+        }
+      })
+    } else {
+      webseeds.forEach(function (wire) {
+        if(wire.peerChoking) {
+          console.log('UnChoke webseed')
+          wire._onUnChoke()
+        }
+      })
+    }
+    if (speed<200000 && webseeds.length<1 && torrent.urlList.length>0){
+      console.log('speed is not good have backup')
+      torrent.urlList.forEach(function(item){
+        console.log(item)
+        if(item && item !== ''){
+          torrent.addWebSeed(item)
+        }
+      })
+    }
   }
 }
 
